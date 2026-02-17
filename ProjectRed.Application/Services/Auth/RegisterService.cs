@@ -3,6 +3,7 @@ using ProjectRed.Core.DTOs.Data;
 using ProjectRed.Core.DTOs.Requests.Auth;
 using ProjectRed.Core.DTOs.Responses;
 using ProjectRed.Core.Entities;
+using ProjectRed.Core.Enums;
 using ProjectRed.Core.Exceptions;
 using ProjectRed.Core.Interfaces.Repositories;
 using ProjectRed.Core.Interfaces.Services.Auth;
@@ -122,7 +123,7 @@ namespace ProjectRed.Application.Services.Auth
 
             var userAuth = new UserAuth
             {
-                Provider = "local",
+                Provider = AuthProvider.Local.ToString().ToLowerInvariant(),
                 NormalizedEmail = normalizedEmail,
                 Email = normalizedEmail,
                 PasswordHash = hashedPassword,
@@ -164,7 +165,7 @@ namespace ProjectRed.Application.Services.Auth
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
 
             var existingGoogle = await _userAuthRepository
-                .FindByProviderAndProviderId("google", request.ProviderUserId);
+                .FindByProviderAndProviderId(AuthProvider.Google.ToString().ToLowerInvariant(), request.ProviderUserId);
 
             if (existingGoogle != null)
             {
@@ -205,7 +206,7 @@ namespace ProjectRed.Application.Services.Auth
                 var googleAuth = new UserAuth
                 {
                     UserId = existingAuthByEmail.UserId,
-                    Provider = "google",
+                    Provider = AuthProvider.Google.ToString().ToLowerInvariant(),
                     ProviderUserId = request.ProviderUserId,
                     Email = request.Email,
                     NormalizedEmail = normalizedEmail
@@ -244,7 +245,7 @@ namespace ProjectRed.Application.Services.Auth
             // create new auth entry without user
             var pendingAuth = new UserAuth
             {
-                Provider = "google",
+                Provider = AuthProvider.Google.ToString().ToLowerInvariant(),
                 ProviderUserId = request.ProviderUserId,
                 Email = request.Email,
                 NormalizedEmail = normalizedEmail,

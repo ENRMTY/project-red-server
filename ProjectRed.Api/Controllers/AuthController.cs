@@ -15,7 +15,51 @@ namespace ProjectRed.Api.Controllers
         {
             try
             {
-                var result = await _registerService.RegisterAsync(request);
+                var result = await _registerService.RegisterLocalAsync(request);
+
+                if (result.Success)
+                {
+                    return Ok(result);
+                }
+                else
+                {
+                    return BadRequest(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost("google")]
+        public async Task<IActionResult> RegisterOrLoginGoogle([FromBody] GoogleAuthRequest request)
+        {
+            try
+            {
+                var result = await _registerService.RegisterOrLoginGoogleAsync(request);
+
+                if (result.Success)
+                {
+                    return Ok(result);
+                }
+                else
+                {
+                    return BadRequest(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost("complete-profile")]
+        public async Task<IActionResult> CompleteProfile([FromBody] CompleteProfileRequest request)
+        {
+            try
+            {
+                var result = await _registerService.CompleteProfileAsync(request);
 
                 if (result.Success)
                 {

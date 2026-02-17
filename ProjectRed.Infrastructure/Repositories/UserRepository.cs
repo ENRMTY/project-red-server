@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using ProjectRed.Core.Entities;
+using ProjectRed.Core.Enums;
 using ProjectRed.Core.Interfaces.Repositories;
 using ProjectRed.Infrastructure.Data;
 
@@ -19,7 +20,8 @@ namespace ProjectRed.Infrastructure.Repositories
             var normalizedEmail = email.Trim().ToLowerInvariant();
             var userAuth = await _dbContext.UserAuths
                 .Include(ua => ua.User)
-                .FirstOrDefaultAsync(ua => ua.NormalizedEmail == normalizedEmail && ua.Provider == "local");
+                .FirstOrDefaultAsync(ua => ua.NormalizedEmail == normalizedEmail 
+                && ua.Provider == AuthProvider.Local.ToString().ToLowerInvariant());
 
             return userAuth?.User;
         }
@@ -35,7 +37,8 @@ namespace ProjectRed.Infrastructure.Repositories
             var normalizedEmail = email.Trim().ToLowerInvariant();
             var exists = await _dbContext.UserAuths
                 .Include(ua => ua.User)
-                .AnyAsync(ua => ua.NormalizedEmail == normalizedEmail && ua.Provider == "local");
+                .AnyAsync(ua => ua.NormalizedEmail == normalizedEmail 
+                && ua.Provider == AuthProvider.Local.ToString().ToLowerInvariant());
 
             return exists;
         }

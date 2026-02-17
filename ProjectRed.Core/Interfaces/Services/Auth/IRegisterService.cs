@@ -7,5 +7,7 @@ namespace ProjectRed.Core.Interfaces.Services.Auth
     public interface IRegisterService
     {
         Task<AuthResponse<UserDto>> RegisterLocalAsync(RegisterRequest request);
+        Task<AuthResponse<UserDto>> RegisterOrLoginGoogleAsync(GoogleAuthRequest request);
+        Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request);
     }
 }

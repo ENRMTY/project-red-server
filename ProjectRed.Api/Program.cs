@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ProjectRed.Application.Services.Auth;
 using ProjectRed.Application.Validators;
+using ProjectRed.Core.Configuration;
 using ProjectRed.Core.Interfaces.Repositories;
 using ProjectRed.Core.Interfaces.Services.Auth;
 using ProjectRed.Core.Interfaces.Services.Validators;
@@ -34,6 +35,9 @@ builder.Services.AddScoped<IUserAuthRepository, UserAuthRepository>();
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<IPasswordValidator, PasswordValidator>();
 
+// configs
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+
 // register other services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -43,7 +47,6 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-
 Console.WriteLine("ENV: " + builder.Environment.EnvironmentName);
 
 app.UseSwagger();
