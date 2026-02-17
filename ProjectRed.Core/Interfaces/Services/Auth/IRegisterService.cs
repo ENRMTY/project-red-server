@@ -6,6 +6,6 @@ namespace ProjectRed.Core.Interfaces.Services.Auth
 {
     public interface IRegisterService
     {
-        Task<AuthResponse<UserDto>> RegisterAsync(RegisterRequest request);
+        Task<AuthResponse<UserDto>> RegisterLocalAsync(RegisterRequest request);
     }
 }

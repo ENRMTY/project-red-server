@@ -14,12 +14,29 @@ namespace ProjectRed.Infrastructure.Repositories
             await _dbContext.UserAuths.AddAsync(userAuth);
         }
 
+        public async Task UpdateAsync(UserAuth userAuth)
+        {
+            _dbContext.UserAuths.Update(userAuth);
+            await Task.CompletedTask;
+        }
+
         public async Task<UserAuth?> FindUserAuthByEmail(string email)
         {
             var normalizedEmail = email.Trim().ToLowerInvariant();
             var existingAuth = await _dbContext.UserAuths
                 .Include(ua => ua.User)
                 .FirstOrDefaultAsync(ua => ua.NormalizedEmail == normalizedEmail);
+
+            return existingAuth;
+        }
+
+        public async Task<UserAuth?> FindByProviderAndProviderId(string provider, string providerUserId)
+        {
+            var existingAuth = await _dbContext.UserAuths
+                .Include(ua => ua.User)
+                .FirstOrDefaultAsync(ua =>
+                    ua.Provider == provider &&
+                    ua.ProviderUserId == providerUserId);
 
             return existingAuth;
         }

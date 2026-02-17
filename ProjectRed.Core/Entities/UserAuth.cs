@@ -6,7 +6,8 @@ namespace ProjectRed.Core.Entities
     {
         [Key]
         public int Id { get; set; }
-        public int UserId { get; set; }
+        public int? UserId { get; set; }
+
         // e.g., "local", "google", "apple"
         public string Provider { get; set; } = null!;
         public string? ProviderUserId { get; set; }
@@ -23,6 +24,6 @@ namespace ProjectRed.Core.Entities
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-        public User User { get; set; } = null!;
+        public User? User { get; set; }
     }
 }
