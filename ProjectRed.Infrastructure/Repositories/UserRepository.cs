@@ -16,8 +16,12 @@ namespace ProjectRed.Infrastructure.Repositories
 
         public async Task<User?> FindByEmail(string email)
         {
-            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Email == email);
-            return user;
+            var normalizedEmail = email.Trim().ToLowerInvariant();
+            var userAuth = await _dbContext.UserAuths
+                .Include(ua => ua.User)
+                .FirstOrDefaultAsync(ua => ua.NormalizedEmail == normalizedEmail && ua.Provider == "local");
+
+            return userAuth?.User;
         }
 
         public async Task<User?> FindById(int id)
@@ -28,7 +32,20 @@ namespace ProjectRed.Infrastructure.Repositories
 
         public async Task<bool> UserEmailExists(string email)
         {
-            var exists = await _dbContext.Users.AnyAsync(u => u.Email == email);
+            var normalizedEmail = email.Trim().ToLowerInvariant();
+            var exists = await _dbContext.UserAuths
+                .Include(ua => ua.User)
+                .AnyAsync(ua => ua.NormalizedEmail == normalizedEmail && ua.Provider == "local");
+
+            return exists;
+        }
+
+        public async Task<bool> UsernameExists(string username)
+        {
+            var normalizedUsername = username.Trim().ToLowerInvariant();
+            var exists = await _dbContext.Users
+                .AnyAsync(u => u.Username == normalizedUsername);
+
             return exists;
         }
 

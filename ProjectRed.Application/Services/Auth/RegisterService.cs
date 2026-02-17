@@ -11,27 +11,38 @@ using ProjectRed.Core.Interfaces.Services.Validators;
 namespace ProjectRed.Application.Services.Auth
 {
     public class RegisterService(IUserRepository userRepository, IPasswordHasher passwordHasher,
-        IPasswordValidator passwordValidator) : IRegisterService
+        IPasswordValidator passwordValidator, IUserAuthRepository userAuthRepository,
+        IAppRepository appRepository) : IRegisterService
     {
         private readonly IUserRepository _userRepository = userRepository;
         private readonly IPasswordHasher _passwordHasher = passwordHasher;
         private readonly IPasswordValidator _passwordValidator = passwordValidator;
+        private readonly IUserAuthRepository _userAuthRepository = userAuthRepository;
+        private readonly IAppRepository _appRepository = appRepository;
 
         public async Task<AuthResponse<UserDto>> RegisterAsync(RegisterRequest request)
         {
-            if (string.IsNullOrEmpty(request.Email))
+            var normalizedEmail = request.Email?.Trim();
+            if (string.IsNullOrEmpty(normalizedEmail))
             {
                 throw new InvalidInputException("An email is required");
             }
 
-            if (string.IsNullOrEmpty(request.Name))
+            var normalizedDisplayName = request.DisplayName?.Trim();
+            if (string.IsNullOrEmpty(request.DisplayName))
             {
-                throw new InvalidInputException("Name is required");
+                throw new InvalidInputException("Display name is required");
             }
 
             if (string.IsNullOrEmpty(request.Password))
             {
                 throw new InvalidInputException("Password is required");
+            }
+
+            var normalizedUsername = request.Username?.Trim();
+            if (string.IsNullOrEmpty(normalizedUsername))
+            {
+                throw new InvalidInputException("Username is required");
             }
 
             var (IsValid, Message) = YearValidator.ValidateYear(request.BirthYear);
@@ -44,10 +55,36 @@ namespace ProjectRed.Application.Services.Auth
                 };
             }
 
-            var userExists = await _userRepository.UserEmailExists(request.Email);
-            if (userExists)
+            normalizedEmail = normalizedEmail.ToLowerInvariant();
+            normalizedUsername = normalizedUsername.ToLowerInvariant();
+
+            var usernameExists = await _userRepository.UsernameExists(normalizedUsername);
+            if (usernameExists)
+            {
+                throw new AlreadyExistsException("This username is already taken");
+            }
+
+            var localAuthExists = await _userRepository.UserEmailExists(normalizedEmail);
+            if (localAuthExists)
             {
                 throw new AlreadyExistsException("Email already exists");
+            }
+
+            var existingAuth = await _userAuthRepository.FindUserAuthByEmail(normalizedEmail);
+            if (existingAuth != null && existingAuth.Provider != "local")
+            {
+                return new AuthResponse<UserDto>
+                {
+                    Success = false,
+                    Message = $"An account with this email already exists via {existingAuth.Provider}. You can log in with {existingAuth.Provider} or set a new password.",
+                    Details = new UserDto
+                    {
+                        Id = existingAuth.UserId,
+                        DisplayName = existingAuth.User.DisplayName ?? existingAuth.User.Username,
+                        Username = existingAuth.User.Username,
+                        Email = existingAuth.Email
+                    }
+                };
             }
 
             bool isValidPassword = _passwordValidator.IsValid(request.Password);
@@ -64,16 +101,25 @@ namespace ProjectRed.Application.Services.Auth
 
             var user = new User
             {
-                Name = request.Name,
-                Surname = request.Surname,
-                Email = request.Email,
-                PasswordHash = hashedPassword,
+                DisplayName = normalizedDisplayName,
+                Username = normalizedUsername,
                 BirthYear = request.BirthYear,
                 CountryCode = "ZA"
             };
 
+            var userAuth = new UserAuth
+            {
+                Provider = "local",
+                NormalizedEmail = normalizedEmail,
+                Email = normalizedEmail,
+                PasswordHash = hashedPassword,
+                User = user
+            };
+
             await _userRepository.AddAsync(user);
-            bool added = await _userRepository.SaveChangesAsync();
+            await _userAuthRepository.AddAsync(userAuth);
+            
+            bool added = await _appRepository.SaveChangesAsync();
             if (!added)
             {
                 return new AuthResponse<UserDto>
@@ -86,9 +132,9 @@ namespace ProjectRed.Application.Services.Auth
             var userDto = new UserDto
             {
                 Id = user.Id,
-                Name = user.Name,
-                Surname = user.Surname,
-                Email = user.Email
+                DisplayName = user.DisplayName,
+                Username = user.Username,
+                Email = userAuth.Email
             };
 
             return new AuthResponse<UserDto>

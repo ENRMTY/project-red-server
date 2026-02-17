@@ -22,8 +22,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 // register app services
+// services
 builder.Services.AddScoped<IRegisterService, RegisterService>();
+
+// repositories
+builder.Services.AddScoped<IAppRepository, AppRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IUserAuthRepository, UserAuthRepository>();
+
+// utilities
 builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<IPasswordValidator, PasswordValidator>();
 
