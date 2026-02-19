@@ -1,13 +1,14 @@
-﻿using ProjectRed.Core.Enums;
-using System.Security.Claims;
+﻿using System.Security.Claims;
 
 namespace ProjectRed.Core.Interfaces.Services.Auth
 {
     public interface ITokenService
     {
-        string GenerateToken(TokenType tokenType, int? userId = null, string email, string? username = null)
+        string GenerateAuthToken(int userId, string email, string username);
+        string GenerateProfileCompletionToken(string provider, string providerUserId);
+        string GeneratePasswordResetToken(int userId);
+        string GenerateEmailVerificationToken(int userId, string email);
         ClaimsPrincipal? ValidateToken(string token);
-        string? GetClaim(string token, string claimType);
-
+        string? GetClaim(ClaimsPrincipal principal, string claimType);
     }
 }

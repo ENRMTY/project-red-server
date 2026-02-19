@@ -8,6 +8,6 @@ namespace ProjectRed.Core.Interfaces.Services.Auth
     {
         Task<AuthResponse<UserDto>> RegisterLocalAsync(RegisterRequest request);
         Task<AuthResponse<UserDto>> RegisterOrLoginGoogleAsync(GoogleAuthRequest request);
-        Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request);
+        Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request, string provider, string providerUserId);
     }
 }

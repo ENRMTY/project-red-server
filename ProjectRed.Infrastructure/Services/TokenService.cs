@@ -21,37 +21,52 @@ namespace ProjectRed.Infrastructure.Services
             _audience = jwtSettings.Audience;
         }
 
-        public string GenerateToken(TokenType tokenType, int? userId = null, string email, string? username = null)
+        public string GenerateAuthToken(int userId, string email, string username)
         {
             var claims = new List<Claim>
             {
-                new(ClaimTypes.Email, email)
+                new("sub", userId.ToString()),
+                new("email", email),
+                new("username", username),
+                new("token_type", TokenType.Authentication.ToString().ToLower())
+            };
+            
+            return CreateToken(claims, TimeSpan.FromDays(30));
+        }
+
+        public string GenerateProfileCompletionToken(string provider, string providerUserId)
+        {
+            var claims = new List<Claim>
+            {
+                new("provider", provider),
+                new("provider_user_id", providerUserId),
+                new("token_type", "profile_completion")
             };
 
-            if (userId.HasValue)
+            return CreateToken(claims, TimeSpan.FromMinutes(15));
+        }
+
+        public string GeneratePasswordResetToken(int userId)
+        {
+            var claims = new List<Claim>
             {
-                claims.Add(new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()));
-            }
+                new("sub", userId.ToString()),
+                new("token_type", "password_reset")
+            };
 
-            if (!string.IsNullOrEmpty(username))
+            return CreateToken(claims, TimeSpan.FromMinutes(10));
+        }
+
+        public string GenerateEmailVerificationToken(int userId, string email)
+        {
+            var claims = new List<Claim>
             {
-                claims.Add(new Claim(ClaimTypes.Name, username));
-            }
+                new("sub", userId.ToString()),
+                new("email", email),
+                new("token_type", "email_verification")
+            };
 
-            claims.Add(new Claim(ClaimTypes.Role, tokenType.ToString()));
-
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: _issuer,
-                audience: _audience,
-                claims: claims,
-                expires: DateTime.UtcNow.AddDays(180),
-                signingCredentials: creds
-            );
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
+            return CreateToken(claims, TimeSpan.FromHours(24));
         }
 
         public ClaimsPrincipal? ValidateToken(string token)
@@ -80,12 +95,25 @@ namespace ProjectRed.Infrastructure.Services
             }
         }
 
-        public string? GetClaim(string token, string claimType)
+        public string? GetClaim(ClaimsPrincipal principal, string claimType)
         {
-            var principal = ValidateToken(token);
-            var claim = principal?.Claims.FirstOrDefault(c => c.Type == claimType)?.Value;
+            return principal.Claims.FirstOrDefault(c => c.Type == claimType)?.Value;
+        }
 
-            return claim ?? null;
+        private string CreateToken(IEnumerable<Claim> claims, TimeSpan expiry)
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_key));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+            var token = new JwtSecurityToken(
+                issuer: _issuer,
+                audience: _audience,
+                claims: claims,
+                expires: DateTime.UtcNow.Add(expiry),
+                signingCredentials: creds
+            );
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
         }
     }
 }

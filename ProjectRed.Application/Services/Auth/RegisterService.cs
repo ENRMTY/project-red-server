@@ -13,16 +13,19 @@ namespace ProjectRed.Application.Services.Auth
 {
     public class RegisterService(IUserRepository userRepository, IPasswordHasher passwordHasher,
         IPasswordValidator passwordValidator, IUserAuthRepository userAuthRepository,
-        IAppRepository appRepository) : IRegisterService
+        IAppRepository appRepository, ITokenService tokenService) : IRegisterService
     {
         private readonly IUserRepository _userRepository = userRepository;
         private readonly IPasswordHasher _passwordHasher = passwordHasher;
         private readonly IPasswordValidator _passwordValidator = passwordValidator;
         private readonly IUserAuthRepository _userAuthRepository = userAuthRepository;
         private readonly IAppRepository _appRepository = appRepository;
+        private readonly ITokenService _tokenService = tokenService;
 
         public async Task<AuthResponse<UserDto>> RegisterLocalAsync(RegisterRequest request)
         {
+            string token;
+
             var normalizedEmail = request.Email?.Trim();
             if (string.IsNullOrEmpty(normalizedEmail))
             {
@@ -30,7 +33,7 @@ namespace ProjectRed.Application.Services.Auth
             }
 
             var normalizedDisplayName = request.DisplayName?.Trim();
-            if (string.IsNullOrEmpty(request.DisplayName))
+            if (string.IsNullOrEmpty(normalizedDisplayName))
             {
                 throw new InvalidInputException("Display name is required");
             }
@@ -79,7 +82,7 @@ namespace ProjectRed.Application.Services.Auth
                 {
                     return new AuthResponse<UserDto>
                     {
-                        Success = false,
+                        Success = true,
                         Message = $"An account with this email already exists via {existingAuth.Provider}. You can log in with {existingAuth.Provider} or set a new password.",
                         Details = new UserDto
                         {
@@ -90,12 +93,28 @@ namespace ProjectRed.Application.Services.Auth
                         }
                     };
                 }
+                if (existingAuth.ProviderUserId != null)
+                {
+                    token = _tokenService.GenerateProfileCompletionToken(
+                        provider: existingAuth.Provider,
+                        providerUserId: existingAuth.ProviderUserId
+                    );
+                } else 
+                {
+                    return new AuthResponse<UserDto>
+                    {
+                        Success = false,
+                        Message = "Invalid credentials",
+                        Details = null
+                    };
+                }
 
                 // user auth exists but profile is missing
                 return new AuthResponse<UserDto>
                 {
-                    Success = false,
+                    Success = true,
                     Message = $"An account with this email already exists via {existingAuth.Provider}. Please complete your profile first.",
+                    Token = token,
                     Details = null,
                     RequiresProfileCompletion = true
                 };
@@ -151,17 +170,24 @@ namespace ProjectRed.Application.Services.Auth
                 Email = userAuth.NormalizedEmail,
             };
 
+            token = _tokenService.GenerateAuthToken(
+                userId: user.Id,
+                email: userAuth.NormalizedEmail,
+                username: user.Username
+            );
+
             return new AuthResponse<UserDto>
             {
                 Success = true,
                 Message = "Successfully registered",
-                Token = "token",
+                Token = token,
                 Details = userDto
             };
         }
 
         public async Task<AuthResponse<UserDto>> RegisterOrLoginGoogleAsync(GoogleAuthRequest request)
         {
+            string token;
             var normalizedEmail = request.Email.Trim().ToLowerInvariant();
 
             var existingGoogle = await _userAuthRepository
@@ -172,28 +198,49 @@ namespace ProjectRed.Application.Services.Auth
                 // user exists but may not have completed profile
                 if (existingGoogle.User == null || existingGoogle.UserId == null)
                 {
+                    if (existingGoogle.ProviderUserId == null)
+                    {
+                        return new AuthResponse<UserDto>
+                        {
+                            Success = false,
+                            Message = "Invalid credentials",
+                            Details = null
+                        };
+                    }
+
+                    token = _tokenService.GenerateProfileCompletionToken(
+                        provider: existingGoogle.Provider,
+                        providerUserId: existingGoogle.ProviderUserId
+                    );
+
                     return new AuthResponse<UserDto>
                     {
                         Success = true,
                         Message = "Please complete your profile",
-                        Token = "token",
+                        Token = token,
                         RequiresProfileCompletion = true,
                         Details = null
                     };
                 }
+
+                token = _tokenService.GenerateAuthToken(
+                    userId: existingGoogle.UserId.Value,
+                    email: existingGoogle.NormalizedEmail,
+                    username: existingGoogle.User.Username
+                );
 
                 // user exists and has profile, log them in
                 return new AuthResponse<UserDto>
                 {
                     Success = true,
                     Message = "Successfully logged in with Google",
-                    Token = "token",
+                    Token = token,
                     Details = new UserDto
                     {
                         Id = existingGoogle.UserId.Value,
                         DisplayName = existingGoogle.User.DisplayName ?? existingGoogle.User.Username,
                         Username = existingGoogle.User.Username,
-                        Email = existingGoogle.Email
+                        Email = existingGoogle.NormalizedEmail
                     }
                 };
             }
@@ -217,11 +264,17 @@ namespace ProjectRed.Application.Services.Auth
 
                 if (existingAuthByEmail.User != null && existingAuthByEmail.UserId != null)
                 {
+                    token = _tokenService.GenerateAuthToken(
+                        userId: existingAuthByEmail.UserId.Value,
+                        email: existingAuthByEmail.NormalizedEmail,
+                        username: existingAuthByEmail.User.Username
+                    );
+
                     return new AuthResponse<UserDto>
                     {
                         Success = true,
                         Message = "Successfully logged in with Google",
-                        Token = "token",
+                        Token = token,
                         Details = new UserDto
                         {
                             Id = existingAuthByEmail.UserId.Value,
@@ -232,11 +285,16 @@ namespace ProjectRed.Application.Services.Auth
                     };
                 }
 
+                token = _tokenService.GenerateProfileCompletionToken(
+                    provider: AuthProvider.Google.ToString().ToLowerInvariant(),
+                    providerUserId: request.ProviderUserId
+                );
+
                 return new AuthResponse<UserDto>
                 {
                     Success = true,
                     Message = "Please complete your profile",
-                    Token = "token",
+                    Token = token,
                     RequiresProfileCompletion = true,
                     Details = null
                 };
@@ -255,18 +313,23 @@ namespace ProjectRed.Application.Services.Auth
             await _userAuthRepository.AddAsync(pendingAuth);
             await _appRepository.SaveChangesAsync();
 
+            token = _tokenService.GenerateProfileCompletionToken(
+                provider: AuthProvider.Google.ToString().ToLowerInvariant(),
+                providerUserId: request.ProviderUserId
+            );
+
             // tell frontend to go to profile creation
             return new AuthResponse<UserDto>
             {
                 Success = true,
                 Message = "Please complete your profile",
-                Token = "token",
+                Token = token,
                 RequiresProfileCompletion = true,
                 Details = null
             };
         }
 
-        public async Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request)
+        public async Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request, string provider, string providerUserId)
         {
             if (string.IsNullOrWhiteSpace(request.Username))
             {
@@ -283,8 +346,8 @@ namespace ProjectRed.Application.Services.Auth
 
             // find the pending auth
             var pendingAuth = await _userAuthRepository.FindByProviderAndProviderId(
-                request.Provider,
-                request.ProviderUserId
+                provider,
+                providerUserId
             );
 
             if (pendingAuth == null)
@@ -317,8 +380,8 @@ namespace ProjectRed.Application.Services.Auth
 
             await _userRepository.AddAsync(user);
             await _userAuthRepository.UpdateAsync(pendingAuth);
-            bool saved = await _appRepository.SaveChangesAsync();
 
+            bool saved = await _appRepository.SaveChangesAsync();
             if (!saved)
             {
                 return new AuthResponse<UserDto>
@@ -328,11 +391,17 @@ namespace ProjectRed.Application.Services.Auth
                 };
             }
 
+            string token = _tokenService.GenerateAuthToken(
+                userId: user.Id,
+                email: pendingAuth.NormalizedEmail,
+                username: user.Username
+            );
+
             return new AuthResponse<UserDto>
             {
                 Success = true,
                 Message = "Profile completed successfully",
-                Token = "token",
+                Token = token,
                 Details = new UserDto
                 {
                     Id = user.Id,
