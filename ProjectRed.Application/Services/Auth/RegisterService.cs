@@ -3,6 +3,7 @@ using ProjectRed.Core.DTOs.Data;
 using ProjectRed.Core.DTOs.Requests.Auth;
 using ProjectRed.Core.DTOs.Responses;
 using ProjectRed.Core.Entities;
+using ProjectRed.Core.Enums;
 using ProjectRed.Core.Exceptions;
 using ProjectRed.Core.Interfaces.Repositories;
 using ProjectRed.Core.Interfaces.Services.Auth;
@@ -11,27 +12,41 @@ using ProjectRed.Core.Interfaces.Services.Validators;
 namespace ProjectRed.Application.Services.Auth
 {
     public class RegisterService(IUserRepository userRepository, IPasswordHasher passwordHasher,
-        IPasswordValidator passwordValidator) : IRegisterService
+        IPasswordValidator passwordValidator, IUserAuthRepository userAuthRepository,
+        IAppRepository appRepository, ITokenService tokenService) : IRegisterService
     {
         private readonly IUserRepository _userRepository = userRepository;
         private readonly IPasswordHasher _passwordHasher = passwordHasher;
         private readonly IPasswordValidator _passwordValidator = passwordValidator;
+        private readonly IUserAuthRepository _userAuthRepository = userAuthRepository;
+        private readonly IAppRepository _appRepository = appRepository;
+        private readonly ITokenService _tokenService = tokenService;
 
-        public async Task<AuthResponse<UserDto>> RegisterAsync(RegisterRequest request)
+        public async Task<AuthResponse<UserDto>> RegisterLocalAsync(RegisterRequest request)
         {
-            if (string.IsNullOrEmpty(request.Email))
+            string token;
+
+            var normalizedEmail = request.Email?.Trim();
+            if (string.IsNullOrEmpty(normalizedEmail))
             {
                 throw new InvalidInputException("An email is required");
             }
 
-            if (string.IsNullOrEmpty(request.Name))
+            var normalizedDisplayName = request.DisplayName?.Trim();
+            if (string.IsNullOrEmpty(normalizedDisplayName))
             {
-                throw new InvalidInputException("Name is required");
+                throw new InvalidInputException("Display name is required");
             }
 
             if (string.IsNullOrEmpty(request.Password))
             {
                 throw new InvalidInputException("Password is required");
+            }
+
+            var normalizedUsername = request.Username?.Trim();
+            if (string.IsNullOrEmpty(normalizedUsername))
+            {
+                throw new InvalidInputException("Username is required");
             }
 
             var (IsValid, Message) = YearValidator.ValidateYear(request.BirthYear);
@@ -44,10 +59,65 @@ namespace ProjectRed.Application.Services.Auth
                 };
             }
 
-            var userExists = await _userRepository.UserEmailExists(request.Email);
-            if (userExists)
+            normalizedEmail = normalizedEmail.ToLowerInvariant();
+            normalizedUsername = normalizedUsername.ToLowerInvariant();
+
+            var usernameExists = await _userRepository.UsernameExists(normalizedUsername);
+            if (usernameExists)
+            {
+                throw new AlreadyExistsException("This username is already taken");
+            }
+
+            var localAuthExists = await _userRepository.UserEmailExists(normalizedEmail);
+            if (localAuthExists)
             {
                 throw new AlreadyExistsException("Email already exists");
+            }
+
+            var existingAuth = await _userAuthRepository.FindUserAuthByEmail(normalizedEmail);
+            if (existingAuth != null && existingAuth.Provider != "local")
+            {
+                // check if user profile exists
+                if (existingAuth.User != null && existingAuth.UserId != null)
+                {
+                    return new AuthResponse<UserDto>
+                    {
+                        Success = true,
+                        Message = $"An account with this email already exists via {existingAuth.Provider}. You can log in with {existingAuth.Provider} or set a new password.",
+                        Details = new UserDto
+                        {
+                            Id = existingAuth.UserId.Value,
+                            DisplayName = existingAuth.User.DisplayName ?? existingAuth.User.Username,
+                            Username = existingAuth.User.Username,
+                            Email = existingAuth.Email
+                        }
+                    };
+                }
+                if (existingAuth.ProviderUserId != null)
+                {
+                    token = _tokenService.GenerateProfileCompletionToken(
+                        provider: existingAuth.Provider,
+                        providerUserId: existingAuth.ProviderUserId
+                    );
+                } else 
+                {
+                    return new AuthResponse<UserDto>
+                    {
+                        Success = false,
+                        Message = "Invalid credentials",
+                        Details = null
+                    };
+                }
+
+                // user auth exists but profile is missing
+                return new AuthResponse<UserDto>
+                {
+                    Success = true,
+                    Message = $"An account with this email already exists via {existingAuth.Provider}. Please complete your profile first.",
+                    Token = token,
+                    Details = null,
+                    RequiresProfileCompletion = true
+                };
             }
 
             bool isValidPassword = _passwordValidator.IsValid(request.Password);
@@ -64,16 +134,25 @@ namespace ProjectRed.Application.Services.Auth
 
             var user = new User
             {
-                Name = request.Name,
-                Surname = request.Surname,
-                Email = request.Email,
-                PasswordHash = hashedPassword,
+                DisplayName = normalizedDisplayName,
+                Username = normalizedUsername,
                 BirthYear = request.BirthYear,
                 CountryCode = "ZA"
             };
 
+            var userAuth = new UserAuth
+            {
+                Provider = AuthProvider.Local.ToString().ToLowerInvariant(),
+                NormalizedEmail = normalizedEmail,
+                Email = normalizedEmail,
+                PasswordHash = hashedPassword,
+                User = user
+            };
+
             await _userRepository.AddAsync(user);
-            bool added = await _userRepository.SaveChangesAsync();
+            await _userAuthRepository.AddAsync(userAuth);
+
+            bool added = await _appRepository.SaveChangesAsync();
             if (!added)
             {
                 return new AuthResponse<UserDto>
@@ -86,17 +165,250 @@ namespace ProjectRed.Application.Services.Auth
             var userDto = new UserDto
             {
                 Id = user.Id,
-                Name = user.Name,
-                Surname = user.Surname,
-                Email = user.Email
+                DisplayName = user.DisplayName,
+                Username = user.Username,
+                Email = userAuth.NormalizedEmail,
             };
+
+            token = _tokenService.GenerateAuthToken(
+                userId: user.Id,
+                email: userAuth.NormalizedEmail,
+                username: user.Username
+            );
 
             return new AuthResponse<UserDto>
             {
                 Success = true,
                 Message = "Successfully registered",
-                Token = "token",
+                Token = token,
                 Details = userDto
+            };
+        }
+
+        public async Task<AuthResponse<UserDto>> RegisterOrLoginGoogleAsync(GoogleAuthRequest request)
+        {
+            string token;
+            var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+
+            var existingGoogle = await _userAuthRepository
+                .FindByProviderAndProviderId(AuthProvider.Google.ToString().ToLowerInvariant(), request.ProviderUserId);
+
+            if (existingGoogle != null)
+            {
+                // user exists but may not have completed profile
+                if (existingGoogle.User == null || existingGoogle.UserId == null)
+                {
+                    if (existingGoogle.ProviderUserId == null)
+                    {
+                        return new AuthResponse<UserDto>
+                        {
+                            Success = false,
+                            Message = "Invalid credentials",
+                            Details = null
+                        };
+                    }
+
+                    token = _tokenService.GenerateProfileCompletionToken(
+                        provider: existingGoogle.Provider,
+                        providerUserId: existingGoogle.ProviderUserId
+                    );
+
+                    return new AuthResponse<UserDto>
+                    {
+                        Success = true,
+                        Message = "Please complete your profile",
+                        Token = token,
+                        RequiresProfileCompletion = true,
+                        Details = null
+                    };
+                }
+
+                token = _tokenService.GenerateAuthToken(
+                    userId: existingGoogle.UserId.Value,
+                    email: existingGoogle.NormalizedEmail,
+                    username: existingGoogle.User.Username
+                );
+
+                // user exists and has profile, log them in
+                return new AuthResponse<UserDto>
+                {
+                    Success = true,
+                    Message = "Successfully logged in with Google",
+                    Token = token,
+                    Details = new UserDto
+                    {
+                        Id = existingGoogle.UserId.Value,
+                        DisplayName = existingGoogle.User.DisplayName ?? existingGoogle.User.Username,
+                        Username = existingGoogle.User.Username,
+                        Email = existingGoogle.NormalizedEmail
+                    }
+                };
+            }
+
+            var existingAuthByEmail = await _userAuthRepository
+                .FindUserAuthByEmail(normalizedEmail);
+
+            if (existingAuthByEmail != null)
+            {
+                var googleAuth = new UserAuth
+                {
+                    UserId = existingAuthByEmail.UserId,
+                    Provider = AuthProvider.Google.ToString().ToLowerInvariant(),
+                    ProviderUserId = request.ProviderUserId,
+                    Email = request.Email,
+                    NormalizedEmail = normalizedEmail
+                };
+
+                await _userAuthRepository.AddAsync(googleAuth);
+                await _appRepository.SaveChangesAsync();
+
+                if (existingAuthByEmail.User != null && existingAuthByEmail.UserId != null)
+                {
+                    token = _tokenService.GenerateAuthToken(
+                        userId: existingAuthByEmail.UserId.Value,
+                        email: existingAuthByEmail.NormalizedEmail,
+                        username: existingAuthByEmail.User.Username
+                    );
+
+                    return new AuthResponse<UserDto>
+                    {
+                        Success = true,
+                        Message = "Successfully logged in with Google",
+                        Token = token,
+                        Details = new UserDto
+                        {
+                            Id = existingAuthByEmail.UserId.Value,
+                            DisplayName = existingAuthByEmail.User.DisplayName ?? existingAuthByEmail.User.Username,
+                            Username = existingAuthByEmail.User.Username,
+                            Email = existingAuthByEmail.Email
+                        }
+                    };
+                }
+
+                token = _tokenService.GenerateProfileCompletionToken(
+                    provider: AuthProvider.Google.ToString().ToLowerInvariant(),
+                    providerUserId: request.ProviderUserId
+                );
+
+                return new AuthResponse<UserDto>
+                {
+                    Success = true,
+                    Message = "Please complete your profile",
+                    Token = token,
+                    RequiresProfileCompletion = true,
+                    Details = null
+                };
+            }
+
+            // create new auth entry without user
+            var pendingAuth = new UserAuth
+            {
+                Provider = AuthProvider.Google.ToString().ToLowerInvariant(),
+                ProviderUserId = request.ProviderUserId,
+                Email = request.Email,
+                NormalizedEmail = normalizedEmail,
+                UserId = null
+            };
+
+            await _userAuthRepository.AddAsync(pendingAuth);
+            await _appRepository.SaveChangesAsync();
+
+            token = _tokenService.GenerateProfileCompletionToken(
+                provider: AuthProvider.Google.ToString().ToLowerInvariant(),
+                providerUserId: request.ProviderUserId
+            );
+
+            // tell frontend to go to profile creation
+            return new AuthResponse<UserDto>
+            {
+                Success = true,
+                Message = "Please complete your profile",
+                Token = token,
+                RequiresProfileCompletion = true,
+                Details = null
+            };
+        }
+
+        public async Task<AuthResponse<UserDto>> CompleteProfileAsync(CompleteProfileRequest request, string provider, string providerUserId)
+        {
+            if (string.IsNullOrWhiteSpace(request.Username))
+            {
+                throw new InvalidInputException("Username is required");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.DisplayName))
+            {
+                throw new InvalidInputException("Display name is required");
+            }
+
+            string normalizedUsername = request.Username.Trim().ToLowerInvariant();
+            string displayName = request.DisplayName.Trim();
+
+            // find the pending auth
+            var pendingAuth = await _userAuthRepository.FindByProviderAndProviderId(
+                provider,
+                providerUserId
+            );
+
+            if (pendingAuth == null)
+            {
+                throw new NotFoundException("Pending authentication record not found");
+            }
+
+            if (pendingAuth.UserId != null)
+            {
+                throw new InvalidOperationException("Profile is already completed");
+            }
+
+            var usernameExists = await _userRepository.UsernameExists(normalizedUsername);
+            if (usernameExists)
+            {
+                throw new AlreadyExistsException("This username is already taken");
+            }
+
+            // finally create the user
+            var user = new User
+            {
+                Username = normalizedUsername,
+                DisplayName = displayName,
+                CountryCode = "ZA",
+                BirthYear = request.BirthYear
+            };
+
+            // assign the user to pending auth
+            pendingAuth.User = user;
+
+            await _userRepository.AddAsync(user);
+            await _userAuthRepository.UpdateAsync(pendingAuth);
+
+            bool saved = await _appRepository.SaveChangesAsync();
+            if (!saved)
+            {
+                return new AuthResponse<UserDto>
+                {
+                    Success = false,
+                    Message = "Failed to complete profile"
+                };
+            }
+
+            string token = _tokenService.GenerateAuthToken(
+                userId: user.Id,
+                email: pendingAuth.NormalizedEmail,
+                username: user.Username
+            );
+
+            return new AuthResponse<UserDto>
+            {
+                Success = true,
+                Message = "Profile completed successfully",
+                Token = token,
+                Details = new UserDto
+                {
+                    Id = user.Id,
+                    DisplayName= user.DisplayName,
+                    Username = user.Username,
+                    Email = pendingAuth.NormalizedEmail
+                }
             };
         }
     }

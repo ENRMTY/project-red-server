@@ -6,6 +6,6 @@ The goal of this app is to bring fans closer to the club by providing **match up
 ---
 
 ## Tech Stack
-- **Frontend:** React Native (Bare Workflow)  
+- **[Frontend](https://github.com/yinndlovu/project-red):** React Native (Bare Workflow)  
 - **Backend:** C# (.NET Core)
 - **Database:** PostgreSQL
