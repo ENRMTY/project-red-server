@@ -22,10 +22,19 @@ namespace ProjectRed.Infrastructure.Repositories
 
         public async Task<UserAuth?> FindUserAuthByEmail(string email)
         {
-            var normalizedEmail = email.Trim().ToLowerInvariant();
             var existingAuth = await _dbContext.UserAuths
                 .Include(ua => ua.User)
-                .FirstOrDefaultAsync(ua => ua.NormalizedEmail == normalizedEmail);
+                .FirstOrDefaultAsync(ua => ua.NormalizedEmail == email);
+
+            return existingAuth;
+        }
+
+        public async Task<UserAuth?> FindUserAuthByUsername(string username)
+        {
+            var existingAuth = await _dbContext.UserAuths
+                .Include(ua => ua.User)
+                .Where(ua => ua.User != null && ua.User.Username == username)
+                .FirstOrDefaultAsync();
 
             return existingAuth;
         }

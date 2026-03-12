@@ -1,0 +1,11 @@
+﻿using ProjectRed.Core.DTOs.Data;
+using ProjectRed.Core.DTOs.Requests.Auth;
+using ProjectRed.Core.DTOs.Responses;
+
+namespace ProjectRed.Core.Interfaces.Services.Auth
+{
+    public interface ILoginService
+    {
+        Task<AuthResponse<UserDto>> LoginWithEmailOrUsernameAsync(LoginRequest request);
+    }
+}
