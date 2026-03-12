@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
 using ProjectRed.Application.Services.Auth;
 using ProjectRed.Application.Validators;
 using ProjectRed.Core.Configuration;
@@ -11,7 +13,6 @@ using ProjectRed.Infrastructure.Repositories;
 using ProjectRed.Infrastructure.Services;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
-using Microsoft.IdentityModel.Tokens;
 
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 JwtSecurityTokenHandler.DefaultOutboundClaimTypeMap.Clear();
@@ -86,14 +87,25 @@ builder.Services
 // register other services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Project Red", Version = "v1" });
+
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme.",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+});
 
 // build the app
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-Console.WriteLine("ENV: " + builder.Environment.EnvironmentName);
-
 app.UseSwagger();
 app.UseSwaggerUI();
 

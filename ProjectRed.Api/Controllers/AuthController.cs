@@ -8,9 +8,10 @@ namespace ProjectRed.Api.Controllers
 {
     [ApiController]
     [Route("api/auth")]
-    public class AuthController(IRegisterService registerService) : ControllerBase
+    public class AuthController(IRegisterService registerService, ILoginService loginService) : ControllerBase
     {
         private readonly IRegisterService _registerService = registerService;
+        private readonly ILoginService _loginService = loginService;
 
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
@@ -85,6 +86,28 @@ namespace ProjectRed.Api.Controllers
             try
             {
                 var result = await _registerService.CompleteProfileAsync(request, provider, providerUserId);
+
+                if (result.Success)
+                {
+                    return Ok(result);
+                }
+                else
+                {
+                    return BadRequest(result);
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+        }
+
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            try
+            {
+                var result = await _loginService.LoginWithEmailOrUsernameAsync(request);
 
                 if (result.Success)
                 {
